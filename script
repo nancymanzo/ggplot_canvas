@@ -1,3 +1,4 @@
+# Cargar librerías -------------------------------------------------------------
 library(readxl)
 library(readr)
 library(ggplot2)
@@ -12,68 +13,107 @@ library(gt)
 library(DT)
 library(lubridate)
 library(stringi)
+library(stringr)
 
-setwd("~/IPAS/data/ipas/datos/05_graficos_canvas") 
+# Exportar bases ---------------------------------------------------------------
+setwd("~/IPAS/data/ipas/datos/02_base_limpia")
 
-usuarias <- read_excel("~/IPAS/data/ipas/datos/02_base_limpia/usuarias/00_base_usuarias.xlsx") %>% filter(`pais-desc`=="Argentina") %>% 
+# Base concentrada
+usuarias <- read_excel("usuarias/00_base_usuarias.xlsx") %>% 
   mutate(
     `unidad-desc` = case_when(
-      `estado-desc` == "Santa Fe" & `unidad-desc` %in% c("Hospital José Bernardo Iturraspe","Hospital Jose Bernardo Iturraspe") ~ "Santa Fe",
-      `estado-desc` == "Santa Fe" & `unidad-desc` %in% c("Hospital Eva Perón", "Hospital Eva Peron") ~ "Santa Fe",
-      `estado-desc` == "Santa Fe" & `unidad-desc` %in% c("HIGA Evita de Lanus","HIGA Evita de Lanus") ~ "Santa Fe",
-      # `estado-desc` == "Santa Fe" & `unidad-desc` == "Hospital Zonal General de Agudos Dr. Carlos Bocalandro" ~ "Hospital Bocalandro",
-      # `estado-desc` == "Santa Fe" & `unidad-desc` == "Hospital Zonal General de Agudos General Manuel Belgrano" ~ "Manuel Belgrano",
-       `unidad-desc` == "Hospital Zonal General de Agudos Dr. Carlos Bocalandro" ~ "Hospital Bocalandro",
-       `unidad-desc` == "Hospital Zonal General de Agudos General Manuel Belgrano" ~ "Manuel Belgrano",
-      TRUE ~ `unidad-desc`
-    )) 
-
-
-# Supongamos que `usuarias` es tu dataset inicial
-usuarias %>%
-  group_by(`unidad-desc`) %>% 
-  summarise(
-    absoluto = n(),  # Cuenta los valores por unidad
-    .groups = 'drop'
-  ) %>% 
-  mutate(
-    freq_relativa = absoluto / sum(absoluto),  # Calcula la frecuencia relativa
-    porcentaje = round(freq_relativa * 100, digits = 2)
-  ) %>% 
-  bind_rows(
-    summarise(
-      ., 
-      `unidad-desc` = "Argentina",  # Nueva fila con nombre "Total"
-      absoluto = sum(absoluto),  # Suma de todos los valores
-      freq_relativa = 1,  # Total tiene una frecuencia relativa de 1
-      porcentaje = 100  # Porcentaje total es 100
+      str_detect(`unidad-desc`, "Hospital Zonal General de Agudos Dr. Carlos Bocalandro") ~ "Bocalandro",
+      str_detect(`unidad-desc`, "HIGA Dr. Diego Paroissien") ~ "Paroissien",
+      str_detect(`unidad-desc`, "HIGA San Mart.n") ~ "San Martín",
+      str_detect(`unidad-desc`, "Hospital Zonal General de Agudos General Manuel Belgrano") ~ "Belgrano",
+      str_detect(`unidad-desc`, "HIGA Evita de Lan.s") ~ "Lanus",
+      str_detect(`unidad-desc`, "HIGA Dr. Jos. Penna") ~ "Penna",
+      str_detect(`unidad-desc`, "Hospital Jos. Bernardo Iturraspe") ~ "Iturraspe",
+      str_detect(`unidad-desc`, "Hospital Eva Per.n") ~ "Perón",
+      str_detect(`unidad-desc`, "Hospital General Dr. Aurelio Valdivieso") ~ "Valdivieso",
+      str_detect(`unidad-desc`, "Hospital General Dr. Aurrlio Valdivieso") ~ "Valdivieso",
+      str_detect(`unidad-desc`, "Clinica de la Mujer de Oxaca") ~ "Oxaca",
+      str_detect(`unidad-desc`, "Hospital General Dr. Aurelio Valvidieso") ~ "Valdivieso",
+      str_detect(`unidad-desc`, "Hospital General Dr Aurelio Valdivieso") ~ "Valdivieso",
+      str_detect(`unidad-desc`, "Clínica de salud sexual y reproductiva de la Dirección de Unidades Médicas Especializas (DUME)") ~ "DUME",
+      
+      TRUE ~ `unidad-desc`),
+    `lac104-desc`= case_when(
+      `lac104-desc`=="Aborto inducido/legal/ILE"~"Aborto inducido/legal/IVE",
+      `lac104-desc`=="Atencion post-aborto"~"Atención post-aborto",
     )
   ) %>% 
+  filter(`pais-desc`=="Argentina")
+
+
+
+setwd("~/IPAS/data/ipas/datos/05_graficos_canvas")
+#############################
+# Modificar los datos para asegurar que "Lanús" esté asignado a "Buenos Aires"
+usuarias <- usuarias %>%
+  mutate(`estado-desc` = ifelse(`unidad-desc` == "Lanus", "Buenos Aires", `estado-desc`))
+
+# Agrupar datos y calcular frecuencias
+grouped_data <- usuarias %>%
+  group_by(`unidad-desc`, `estado-desc`) %>%
+  summarise(absoluto = n(), .groups = "drop") %>%
   mutate(
-    categoria = ifelse(`unidad-desc` == "Argentina", "Argentina", "Otro")  # Nueva columna para distinguir "Total"
-  ) %>% 
-  ggplot(aes(x = reorder(str_wrap(`unidad-desc`, width = 10), porcentaje), y = porcentaje, fill = categoria)) +  
-  geom_col(position = "stack") +
-  geom_label(aes(label = paste0(absoluto, "\n (", porcentaje, "%)")), 
-             position = position_stack(vjust = 0.5), fill = "white", size = 3.5, show.legend = FALSE) +  
-  scale_fill_manual(values = c("Argentina" = "#e88d38", "Otro" = "#474c94"), na.value = "gray70") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Eje Y en porcentaje
-  labs(title = NULL, y = NULL, x = NULL, fill = NULL) + 
+    freq_relativa = absoluto / sum(absoluto),
+    porcentaje = freq_relativa * 100
+  )
+
+# Agregar fila de total
+total_row <- grouped_data %>%
+  summarise(
+    `unidad-desc` = "Total",
+    `estado-desc` = "Total",
+    absoluto = sum(absoluto),
+    freq_relativa = 1,
+    porcentaje = 100
+  )
+
+grouped_data <- bind_rows(grouped_data, total_row) %>%
+  arrange(desc(porcentaje))
+
+# Definir colores para las entidades
+grouped_data <- grouped_data %>%
+  mutate(color = case_when(
+    `estado-desc` == "Buenos Aires" ~ "#38658a",
+    `estado-desc` == "Santa Fe" ~ "#655080",
+    `estado-desc` == "Total" ~ "#d4712f",
+    TRUE ~ "lightgray"
+  ))
+
+# Crear el gráfico
+ggplot(grouped_data, aes(
+  x = reorder(`unidad-desc`, porcentaje),
+  y = porcentaje,
+  fill = color,
+  label = paste0(round(porcentaje, 1), "% \n(", absoluto, ")")
+)) +
+  geom_col() +
+  geom_text(hjust = .5, vjust=-.1) +
+  scale_fill_identity() +
+  labs(title = NULL, y = "", x = "", fill = "") +
   theme_minimal() +
   theme(
     panel.background = element_rect(fill = "transparent", color = NA), # Fondo transparente
     plot.background = element_rect(fill = "transparent", color = NA), # Fondo transparente
-    panel.grid = element_blank(),  # Quitar cuadricula
-    legend.position = "none",
-    axis.text = element_text(size = 12),
-    axis.title = element_text(size = 14)) +
-  guides(fill = guide_legend(ncol = 1))->gr_1
+    panel.grid = element_blank(),  
+    legend.position = "right",
+    axis.text.y = element_text(size = 12, color = "black"), # Texto del eje X en blanco
+    axis.text.x = element_text(size = 12, color = "black"), # Texto del eje X en blanco
+    axis.title = element_text(size = 14, color = "black"), # Títulos de los ejes en blanco
+    legend.title = element_text(size = 14, color = "black"), # Título de la leyenda en blanco
+    legend.text = element_text(color = "black", size=18) # Texto de la leyenda en blanco
+  ) +
+  guides(fill = guide_legend(ncol = 4))->gr_1
 
 # Guardar el gráfico sin fondo
-ggsave(filename = "grafico_1.png", plot = gr_1, bg = "transparent", dpi = 500, width = 10, height = 6)
+ggsave(filename = "grafico_1.png", plot = gr_1, bg = "transparent", dpi = 700, width = 10, height = 6)
 gr_1
+# ------------------------------------------------------------------------------
 
-##########################################################################################
 usuarias %>% 
   group_by(grupo_de_edad) %>% 
   summarise(absoluto = n()) %>%
@@ -84,7 +124,21 @@ usuarias %>%
   select(grupo_de_edad,`unidad-desc`, absoluto, freq_relativa, porcentaje)->argentina_2
 
 
-usuarias %>%
+usuarias %>% 
+  mutate(
+    `unidad-desc` = case_when(
+      `unidad-desc` == "Bocalandro"~ "PBA",
+      `unidad-desc` == "Paroissien"~ "PBA",
+      `unidad-desc` == "San Martín"~ "PBA",
+      `unidad-desc` == "Belgrano"~ "PBA",
+      `unidad-desc` == "Lanus"~ "PBA",
+      `unidad-desc` == "Penna"~ "PBA",
+      `unidad-desc` == "Iturraspe"~ "PSF",
+      `unidad-desc` == "Perón"~ "PSF",
+      `unidad-desc` == "Valdivieso"~ "PBA",
+
+      TRUE ~ `unidad-desc`
+    )) %>% 
   group_by(`unidad-desc`, grupo_de_edad) %>% 
   summarise(absoluto = n()) %>%
   mutate(
@@ -132,6 +186,20 @@ usuarias %>%
 
 
 usuarias %>% 
+  mutate(
+    `unidad-desc` = case_when(
+      `unidad-desc` == "Bocalandro"~ "PBA",
+      `unidad-desc` == "Paroissien"~ "PBA",
+      `unidad-desc` == "San Martín"~ "PBA",
+      `unidad-desc` == "Belgrano"~ "PBA",
+      `unidad-desc` == "Lanus"~ "PBA",
+      `unidad-desc` == "Penna"~ "PBA",
+      `unidad-desc` == "Iturraspe"~ "PSF",
+      `unidad-desc` == "Perón"~ "PSF",
+      `unidad-desc` == "Valdivieso"~ "PBA",
+      
+      TRUE ~ `unidad-desc`
+    )) %>% 
   group_by(`unidad-desc`,`lac102-desc`) %>% 
   summarise(absoluto = n()) %>%
   mutate(
@@ -180,6 +248,20 @@ usuarias %>%
 
 
 usuarias %>% 
+  mutate(
+    `unidad-desc` = case_when(
+      `unidad-desc` == "Bocalandro"~ "PBA",
+      `unidad-desc` == "Paroissien"~ "PBA",
+      `unidad-desc` == "San Martín"~ "PBA",
+      `unidad-desc` == "Belgrano"~ "PBA",
+      `unidad-desc` == "Lanus"~ "PBA",
+      `unidad-desc` == "Penna"~ "PBA",
+      `unidad-desc` == "Iturraspe"~ "PSF",
+      `unidad-desc` == "Perón"~ "PSF",
+      `unidad-desc` == "Valdivieso"~ "PBA",
+      
+      TRUE ~ `unidad-desc`
+    )) %>% 
   group_by(`unidad-desc`, `lac103-desc`) %>% 
   summarise(absoluto = n()) %>%
   mutate(
@@ -230,6 +312,20 @@ usuarias %>%
 
 
 usuarias %>% 
+  mutate(
+    `unidad-desc` = case_when(
+      `unidad-desc` == "Bocalandro"~ "PBA",
+      `unidad-desc` == "Paroissien"~ "PBA",
+      `unidad-desc` == "San Martín"~ "PBA",
+      `unidad-desc` == "Belgrano"~ "PBA",
+      `unidad-desc` == "Lanus"~ "PBA",
+      `unidad-desc` == "Penna"~ "PBA",
+      `unidad-desc` == "Iturraspe"~ "PSF",
+      `unidad-desc` == "Perón"~ "PSF",
+      `unidad-desc` == "Valdivieso"~ "PBA",
+      
+      TRUE ~ `unidad-desc`
+    )) %>% 
   group_by(`unidad-desc`, `lac104-desc`) %>% 
   summarise(absoluto = n()) %>%
   mutate(
@@ -241,7 +337,7 @@ usuarias %>%
   geom_label(aes(label = paste0(absoluto, "\n(", porcentaje, "%)"), group = `lac104-desc`), 
              position = position_fill(vjust = 0.3),  # Posición centrada en las barras
              color = "black", size = 3.5, fill = "white", show.legend = FALSE) +
-  scale_fill_manual(values = rev(c("Aborto inducido/legal/ILE" = "#7FC97F",
+  scale_fill_manual(values = rev(c("Aborto inducido/legal/IVE" = "#7FC97F",
                                    "Atención post-aborto" = "#BEAED9"))) +
   
   scale_y_continuous(labels = scales::percent_format(scale = 100)) +  # Eje Y en porcentaje
@@ -268,6 +364,21 @@ gr_5
 
 
 #-------------------------------------------------------------------------------
+# hf-107: ¿Qué tipo de procedimiento tuvo o comenzó el día de hoy?
+# Nota para la entrevistadora: 
+# Si la mujer indica que tomo pastillas, selecciona ‘Aborto con medicamentos’. 
+# Si la mujer indica aspiración, legrado, AMEU, selecciona ‘Aborto instrumental’. 
+# Si la mujer indica pastillas e instrumental, sólo se considera instrumental y se siguen los saltos.
+
+usuarias %>% 
+  filter(!is.na(`hf107-desc`)) %>% 
+  group_by(`hf107-desc`, `hf108-desc`) %>% 
+  summarise(absoluto = n())# %>%
+  # mutate(
+  #   freq_relativa = absoluto / sum(absoluto),  # Calcula la frecuencia relativa
+  #   porcentaje = round(freq_relativa * 100, digits = 2)) %>%
+  # cbind(`unidad-desc`="Total") %>% 
+  # select(`hf107-desc`,`unidad-desc`, absoluto, freq_relativa, porcentaje)
 
 usuarias %>% 
   filter(!is.na(`hf107-desc`)) %>% 
@@ -282,6 +393,19 @@ usuarias %>%
 
 usuarias %>% 
   filter(!is.na(`hf107-desc`)) %>% 
+  mutate(
+    `unidad-desc` = case_when(
+      `unidad-desc` == "Bocalandro"~ "PBA",
+      `unidad-desc` == "Paroissien"~ "PBA",
+      `unidad-desc` == "San Martín"~ "PBA",
+      `unidad-desc` == "Belgrano"~ "PBA",
+      `unidad-desc` == "Lanus"~ "PBA",
+      `unidad-desc` == "Penna"~ "PBA",
+      `unidad-desc` == "Iturraspe"~ "PSF",
+      `unidad-desc` == "Perón"~ "PSF",
+      `unidad-desc` == "Valdivieso"~ "PBA",
+      TRUE ~ `unidad-desc`
+    )) %>% 
   group_by(`unidad-desc`,`hf107-desc`, ) %>% 
   summarise(absoluto = n()) %>%
   mutate(
@@ -332,7 +456,21 @@ usuarias %>%
 
 
 usuarias %>% 
-  filter(!is.na(`grupo_gestación`)) %>%
+  filter(!is.na(`grupo_gestación`)) %>% 
+  mutate(
+    `unidad-desc` = case_when(
+      `unidad-desc` == "Bocalandro"~ "PBA",
+      `unidad-desc` == "Paroissien"~ "PBA",
+      `unidad-desc` == "San Martín"~ "PBA",
+      `unidad-desc` == "Belgrano"~ "PBA",
+      `unidad-desc` == "Lanus"~ "PBA",
+      `unidad-desc` == "Penna"~ "PBA",
+      `unidad-desc` == "Iturraspe"~ "PSF",
+      `unidad-desc` == "Perón"~ "PSF",
+      `unidad-desc` == "Valdivieso"~ "PBA",
+      
+      TRUE ~ `unidad-desc`
+    )) %>% 
   group_by(`unidad-desc`,`grupo_gestación`, ) %>% 
   summarise(absoluto = n()) %>%
   mutate(
@@ -345,7 +483,7 @@ usuarias %>%
              position = position_fill(vjust = 0.3),  # Posición centrada en las barras
              color = "black", size = 3.5, fill = "white", show.legend = FALSE) +
   scale_fill_manual(values = rev(c("11 semanas o más" = "#6e56bf",
-                                   "Menos de 10 semanas" = "#26bf99"))) +
+                                   "Menos de 11 semanas" = "#26bf99"))) +
   scale_y_continuous(labels = scales::percent_format(scale = 100)) +  # Eje Y en porcentaje
   labs(title = NULL, y = "", x = "", fill = "") + 
   theme_minimal() +
@@ -366,7 +504,81 @@ usuarias %>%
 ggsave(filename = "grafico_7.png", plot = gr_7, bg = "transparent", dpi = 700, width = 10, height = 6)
 gr_7
 
-#################################################################################
+# ----------------------------------------------------------
+
+usuarias %>% 
+  mutate(grupo_gestación_1 = case_when(
+    lac105 >= 0 & lac105 <= 12 ~ "Menos de 13 semanas",
+    lac105 >= 13 & lac105 <= 98 ~ "13 semanas o más",
+    TRUE ~ "No especificado")) %>% 
+  filter(!is.na(`grupo_gestación_1`)) %>% 
+  group_by(grupo_gestación_1) %>% 
+  summarise(absoluto = n()) %>%
+  mutate(
+    freq_relativa = absoluto / sum(absoluto),  # Calcula la frecuencia relativa
+    porcentaje = round(freq_relativa * 100, digits = 2)) %>%
+  cbind(`unidad-desc`="Total") %>% 
+  select(`grupo_gestación_1`,`unidad-desc`, absoluto, freq_relativa, porcentaje)->argentina_7_1
+
+
+usuarias %>% 
+  mutate(
+    `unidad-desc` = case_when(
+      `unidad-desc` == "Bocalandro"~ "PBA",
+      `unidad-desc` == "Paroissien"~ "PBA",
+      `unidad-desc` == "San Martín"~ "PBA",
+      `unidad-desc` == "Belgrano"~ "PBA",
+      `unidad-desc` == "Lanus"~ "PBA",
+      `unidad-desc` == "Penna"~ "PBA",
+      `unidad-desc` == "Iturraspe"~ "PSF",
+      `unidad-desc` == "Perón"~ "PSF",
+      `unidad-desc` == "Valdivieso"~ "PBA",
+      
+      TRUE ~ `unidad-desc`
+    )) %>% 
+  mutate(grupo_gestación_1 = case_when(
+    lac105 >= 0 & lac105 <= 12 ~ "Menos de 13 semanas",
+    lac105 >= 13 & lac105 <= 98 ~ "13 semanas o más",
+    TRUE ~ "No especificado")) %>% 
+  filter(!is.na(`grupo_gestación_1`)) %>% 
+  group_by(`unidad-desc`,`grupo_gestación_1`, ) %>% 
+  summarise(absoluto = n()) %>%
+  mutate(
+    freq_relativa = absoluto / sum(absoluto),  # Calcula la frecuencia relativa
+    porcentaje = round(freq_relativa * 100, digits = 2)) %>%
+  rbind(argentina_7_1) %>% 
+  ggplot(aes(x = str_wrap(`unidad-desc`, width = 10), y = porcentaje, fill = `grupo_gestación_1`, label=absoluto)) +  
+  geom_col(position = "fill") +  # Barras apiladas al 100%
+  geom_label(aes(label = paste0(absoluto, "\n(", porcentaje, "%)"), group = `grupo_gestación_1`), 
+             position = position_fill(vjust = 0.3),  # Posición centrada en las barras
+             color = "black", size = 3.5, fill = "white", show.legend = FALSE) +
+  scale_fill_manual(values = rev(c("13 semanas o más" = "#6e56bf",
+                                   "Menos de 13 semanas" = "#26bf99"))) +
+  scale_y_continuous(labels = scales::percent_format(scale = 100)) +  # Eje Y en porcentaje
+  labs(title = NULL, y = "", x = "", fill = "") + 
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "transparent", color = NA), # Fondo transparente
+    plot.background = element_rect(fill = "transparent", color = NA), # Fondo transparente
+    panel.grid = element_blank(),  
+    legend.position = "bottom",
+    axis.text.y = element_text(size = 12, color = "white"), # Texto del eje X en blanco
+    axis.text.x = element_text(size = 12, color = "white"), # Texto del eje X en blanco
+    axis.title = element_text(size = 14, color = "white"), # Títulos de los ejes en blanco
+    legend.title = element_text(size = 14, color = "white"), # Título de la leyenda en blanco
+    legend.text = element_text(color = "white", size=18) # Texto de la leyenda en blanco
+  ) +
+  guides(fill = guide_legend(ncol = 4))->gr_7_1
+
+
+# Guardar el gráfico sin fondo
+ggsave(filename = "grafico_7_1.png", plot = gr_7_1, bg = "transparent", dpi = 700, width = 10, height = 6)
+gr_7_1
+
+
+
+
+#-------------------------------------------------------------------------
 
 usuarias %>% 
   filter(!is.na(`hf107-desc`),
@@ -378,7 +590,7 @@ usuarias %>%
     porcentaje = round(freq_relativa * 100, digits = 2)) %>%
   ggplot(aes(x = str_wrap(`hf107-desc`, width = 10), y = porcentaje, fill = `hf113-desc`, label=`hf113-desc`)) +  
   geom_col(position = "fill") +  # Barras apiladas al 100%
-  geom_label(aes(label = paste0(absoluto, " (", porcentaje, "%)"), group = `hf113-desc`), 
+  geom_label(aes(label = paste0(absoluto, "\n(", porcentaje, "%)"), group = `hf107-desc`), 
              position = position_fill(vjust = 0.5),  # Posición centrada en las barras
              color = "black", size = 3.5, fill = "white", show.legend = FALSE) +
   # scale_fill_manual(values = rev(c("Aborto con medicamentos" = "#7FC97F",
@@ -518,6 +730,7 @@ usuarias %>%
 ggsave(filename = "grafico_11.png", plot = gr_11, bg = "transparent", dpi = 300, width = 8, height = 6)
 gr_11
 
+# --------------------------------
 
 
 ##################################################################################
@@ -757,4 +970,3 @@ usuarias %>%
 # Guardar el gráfico sin fondo
 ggsave(filename = "grafico_17.png", plot = gr_17, bg = "transparent", dpi = 400, width = 16, height = 6)
 gr_17
-
